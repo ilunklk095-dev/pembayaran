@@ -1,4 +1,5 @@
 import { auth, db } from "./firebase-config.js";
+import * as XLSX from "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs";
 
 import {
   signInWithEmailAndPassword,
@@ -18,7 +19,8 @@ import {
   serverTimestamp,
   query,
   orderBy,
-  runTransaction
+  runTransaction,
+  writeBatch
 } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
 
 /* =========================
@@ -39,7 +41,8 @@ const state = {
   bills: [],
   payments: [],
   unsubscribers: [],
-  reportPayments: []
+  reportPayments: [],
+  studentImportRows: []
 };
 
 const $ = (s, ctx = document) => ctx.querySelector(s);
@@ -479,6 +482,226 @@ function renderStudents() {
   refreshPaymentStudentOptions();
 }
 
+
+function normalizeImportHeader(value = "") {
+  return String(value)
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+const STUDENT_HEADER_ALIASES = {
+  NIS: "nis",
+  NISN: "nisn",
+  NAMASISWA: "name",
+  NAMA: "name",
+  KELAS: "className",
+  NAMAKELAS: "className",
+  NAMAORANGTUAWALI: "parentName",
+  NAMAORANGTUA: "parentName",
+  ORANGTUAWALI: "parentName",
+  ORANGTUA: "parentName",
+  NOHPWHATSAPP: "phone",
+  NOHP: "phone",
+  NOMORHP: "phone",
+  WHATSAPP: "phone",
+  ALAMAT: "address",
+  STATUS: "status"
+};
+
+function studentImportModalHtml() {
+  return `
+    <div class="import-help">
+      <strong>Format Excel harus mengikuti data siswa pada aplikasi.</strong>
+      <ul>
+        <li>Kolom wajib: <code>NIS</code>, <code>NAMA SISWA</code>, dan <code>KELAS</code>.</li>
+        <li>Kolom opsional: <code>NISN</code>, <code>NAMA ORANG TUA/WALI</code>, <code>NO HP/WHATSAPP</code>, <code>ALAMAT</code>, <code>STATUS</code>.</li>
+        <li><code>STATUS</code> hanya boleh <code>aktif</code> atau <code>nonaktif</code>; jika kosong otomatis aktif.</li>
+        <li>NIS dan NISN yang sudah ada atau duplikat di file akan ditolak.</li>
+      </ul>
+    </div>
+    <div class="import-file-box">
+      <label><strong>Pilih file Excel (.xlsx / .xls)</strong></label>
+      <input id="studentExcelFile" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">
+      <small>Gunakan tombol <b>Template Excel</b> di halaman Data Siswa agar angka NIS/NISN dan nomor HP yang diawali 0 tidak berubah.</small>
+    </div>
+    <div id="studentImportSummary" class="import-summary hidden"></div>
+    <div id="studentImportPreview" class="import-preview hidden">
+      <table>
+        <thead><tr><th>Baris</th><th>NIS</th><th>NISN</th><th>Nama</th><th>Kelas</th><th>Status</th><th>Validasi</th></tr></thead>
+        <tbody id="studentImportPreviewRows"></tbody>
+      </table>
+    </div>
+    <div id="studentImportNote" class="import-footer-note"></div>
+    <div class="import-actions">
+      <button type="button" class="btn btn-soft" data-close-modal>Batal</button>
+      <button id="confirmStudentImportBtn" type="button" class="btn btn-primary" disabled>Import Siswa Valid</button>
+    </div>
+  `;
+}
+
+function parseStudentExcel(workbook) {
+  const preferredSheet = workbook.SheetNames.find(n => normalizeImportHeader(n) === "DATASISWA");
+  const sheetName = preferredSheet || workbook.SheetNames[0];
+  if (!sheetName) throw new Error("Workbook tidak memiliki sheet.");
+
+  const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+    header: 1,
+    defval: "",
+    raw: false,
+    blankrows: false
+  });
+
+  if (!matrix.length) throw new Error("Sheet Excel kosong.");
+
+  const headers = matrix[0].map(normalizeImportHeader);
+  const indexMap = {};
+  headers.forEach((header, i) => {
+    const field = STUDENT_HEADER_ALIASES[header];
+    if (field && indexMap[field] === undefined) indexMap[field] = i;
+  });
+
+  const missing = [];
+  if (indexMap.nis === undefined) missing.push("NIS");
+  if (indexMap.name === undefined) missing.push("NAMA SISWA");
+  if (indexMap.className === undefined) missing.push("KELAS");
+  if (missing.length) throw new Error(`Kolom wajib tidak ditemukan: ${missing.join(", ")}. Gunakan Template Excel dari aplikasi.`);
+
+  const existingNis = new Set(state.students.map(s => normalize(s.nis)).filter(Boolean));
+  const existingNisn = new Set(state.students.map(s => normalize(s.nisn)).filter(Boolean));
+  const fileNis = new Set();
+  const fileNisn = new Set();
+  const results = [];
+
+  const valueAt = (row, field) => {
+    const idx = indexMap[field];
+    if (idx === undefined) return "";
+    return String(row[idx] ?? "").trim();
+  };
+
+  matrix.slice(1).forEach((row, idx) => {
+    const isBlank = row.every(v => String(v ?? "").trim() === "");
+    if (isBlank) return;
+
+    const nis = valueAt(row, "nis");
+    const nisn = valueAt(row, "nisn");
+    const name = valueAt(row, "name").toUpperCase();
+    const className = valueAt(row, "className").toUpperCase();
+    const parentName = valueAt(row, "parentName");
+    const phone = valueAt(row, "phone");
+    const address = valueAt(row, "address");
+    const rawStatus = valueAt(row, "status").toLowerCase();
+    const status = rawStatus || "aktif";
+    const errors = [];
+
+    if (!nis) errors.push("NIS wajib diisi");
+    if (!name) errors.push("Nama siswa wajib diisi");
+    if (!className) errors.push("Kelas wajib diisi");
+    if (!["aktif", "nonaktif"].includes(status)) errors.push("Status harus aktif/nonaktif");
+
+    const nisKey = normalize(nis);
+    const nisnKey = normalize(nisn);
+
+    if (nisKey && existingNis.has(nisKey)) errors.push("NIS sudah ada di aplikasi");
+    if (nisKey && fileNis.has(nisKey)) errors.push("NIS duplikat di file");
+    if (nisnKey && existingNisn.has(nisnKey)) errors.push("NISN sudah ada di aplikasi");
+    if (nisnKey && fileNisn.has(nisnKey)) errors.push("NISN duplikat di file");
+
+    if (nisKey) fileNis.add(nisKey);
+    if (nisnKey) fileNisn.add(nisnKey);
+
+    results.push({
+      rowNumber: idx + 2,
+      valid: errors.length === 0,
+      errors,
+      student: { nis, nisn, name, className, parentName, phone, address, status }
+    });
+  });
+
+  return { sheetName, results };
+}
+
+function renderStudentImportPreview(sheetName, rows) {
+  state.studentImportRows = rows;
+  const validRows = rows.filter(r => r.valid);
+  const invalidRows = rows.filter(r => !r.valid);
+  const summary = $("#studentImportSummary");
+  const preview = $("#studentImportPreview");
+  const tbody = $("#studentImportPreviewRows");
+  const note = $("#studentImportNote");
+  const confirmBtn = $("#confirmStudentImportBtn");
+
+  summary.classList.remove("hidden");
+  preview.classList.remove("hidden");
+  summary.innerHTML = `
+    <div class="import-summary-card"><span>Total baris</span><strong>${rows.length}</strong></div>
+    <div class="import-summary-card ok"><span>Siap diimport</span><strong>${validRows.length}</strong></div>
+    <div class="import-summary-card bad"><span>Ditolak</span><strong>${invalidRows.length}</strong></div>
+  `;
+
+  const visible = rows.slice(0, 100);
+  tbody.innerHTML = visible.length ? visible.map(r => `
+    <tr>
+      <td>${r.rowNumber}</td>
+      <td>${escapeHtml(r.student.nis || "-")}</td>
+      <td>${escapeHtml(r.student.nisn || "-")}</td>
+      <td><span class="cell-main">${escapeHtml(r.student.name || "-")}</span></td>
+      <td>${escapeHtml(r.student.className || "-")}</td>
+      <td>${statusBadge(r.student.status)}</td>
+      <td>${r.valid ? '<span class="import-ok">✓ Siap diimport</span>' : `<span class="import-error">${escapeHtml(r.errors.join("; "))}</span>`}</td>
+    </tr>
+  `).join("") : emptyRow(7, "Tidak ada baris data pada sheet ini.");
+
+  note.textContent = `${sheetName ? `Sheet: ${sheetName}. ` : ""}${rows.length > 100 ? `Preview menampilkan 100 dari ${rows.length} baris. ` : ""}Hanya baris valid yang akan disimpan.`;
+  confirmBtn.disabled = validRows.length === 0;
+  confirmBtn.textContent = validRows.length ? `Import ${validRows.length} Siswa` : "Tidak Ada Data Valid";
+}
+
+async function importValidStudents() {
+  if (!roleIsAdmin()) return toast("Hanya admin yang dapat import siswa.", "error");
+
+  // Validasi ulang terhadap data terbaru sebelum menulis.
+  const existingNis = new Set(state.students.map(s => normalize(s.nis)).filter(Boolean));
+  const existingNisn = new Set(state.students.map(s => normalize(s.nisn)).filter(Boolean));
+  const rows = state.studentImportRows.filter(r =>
+    r.valid &&
+    !existingNis.has(normalize(r.student.nis)) &&
+    (!r.student.nisn || !existingNisn.has(normalize(r.student.nisn)))
+  );
+
+  if (!rows.length) return toast("Tidak ada siswa valid yang dapat diimport.", "error");
+
+  const btn = $("#confirmStudentImportBtn");
+  setButtonLoading(btn, true, "Mengimport...");
+
+  try {
+    const chunkSize = 400;
+    for (let start = 0; start < rows.length; start += chunkSize) {
+      const batch = writeBatch(db);
+      const chunk = rows.slice(start, start + chunkSize);
+
+      chunk.forEach(({ student }) => {
+        const ref = doc(collection(db, "students"));
+        batch.set(ref, {
+          ...student,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+      });
+
+      await batch.commit();
+    }
+
+    toast(`${rows.length} siswa berhasil diimport dari Excel.`);
+    state.studentImportRows = [];
+    closeModal();
+  } catch (err) {
+    console.error(err);
+    toast(`Import gagal: ${err.message}`, "error");
+    setButtonLoading(btn, false);
+  }
+}
+
 function studentFormHtml(student = {}) {
   return `
     <form id="studentForm" class="form-grid">
@@ -506,6 +729,46 @@ function studentFormHtml(student = {}) {
 
 $("#addStudentBtn").addEventListener("click", () => {
   openModal("Tambah Siswa", "Masukkan data siswa baru.", studentFormHtml());
+});
+
+
+$("#importStudentExcelBtn").addEventListener("click", () => {
+  if (!roleIsAdmin()) return;
+  state.studentImportRows = [];
+  openModal("Import Siswa dari Excel", "Preview dan validasi dilakukan sebelum data disimpan.", studentImportModalHtml());
+});
+
+document.addEventListener("change", async (e) => {
+  if (e.target.id !== "studentExcelFile") return;
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  const lower = file.name.toLowerCase();
+  if (!lower.endsWith(".xlsx") && !lower.endsWith(".xls")) {
+    e.target.value = "";
+    return toast("Pilih file Excel .xlsx atau .xls.", "error");
+  }
+
+  try {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: "array", cellText: true, cellDates: false });
+    const parsed = parseStudentExcel(workbook);
+    renderStudentImportPreview(parsed.sheetName, parsed.results);
+  } catch (err) {
+    console.error(err);
+    state.studentImportRows = [];
+    $("#studentImportSummary")?.classList.add("hidden");
+    $("#studentImportPreview")?.classList.add("hidden");
+    const btn = $("#confirmStudentImportBtn");
+    if (btn) btn.disabled = true;
+    toast(`File tidak dapat diproses: ${err.message}`, "error");
+  }
+});
+
+document.addEventListener("click", async (e) => {
+  if (e.target.id === "confirmStudentImportBtn") {
+    await importValidStudents();
+  }
 });
 
 document.addEventListener("click", async (e) => {
