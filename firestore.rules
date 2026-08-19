@@ -1,0 +1,77 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function hasProfile() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return hasProfile() && userRole() == 'admin';
+    }
+
+    function isStaff() {
+      return hasProfile() && (userRole() == 'admin' || userRole() == 'petugas');
+    }
+
+    // Profil pengguna.
+    // Akun Auth dibuat di Firebase Authentication.
+    // Dokumen users/{uid} dibuat manual oleh admin pertama.
+    match /users/{userId} {
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Data siswa: petugas boleh melihat, admin yang mengubah.
+    match /students/{studentId} {
+      allow read: if isStaff();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Tagihan: admin penuh.
+    // Petugas hanya boleh mengubah field pembayaran saat transaksi.
+    match /bills/{billId} {
+      allow read: if isStaff();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (
+          isStaff()
+          && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['paid', 'remaining', 'status', 'updatedAt'])
+        );
+    }
+
+    // Pembayaran bersifat append-only untuk petugas.
+    // Hanya admin yang dapat menghapus jika benar-benar diperlukan.
+    match /payments/{paymentId} {
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.cashierId == request.auth.uid
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // Identitas sekolah hanya bisa diubah admin.
+    match /settings/{docId} {
+      allow read: if isStaff();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Tolak akses ke path lain.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

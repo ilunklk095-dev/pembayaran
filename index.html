@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0f172a">
+  <title>SchoolPay - Pembayaran Sekolah</title>
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+  <div id="toastRoot" class="toast-root"></div>
+
+  <!-- LOGIN -->
+  <section id="loginView" class="login-view">
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="brand-mark">SP</div>
+        <div>
+          <h1>SchoolPay</h1>
+          <p>Sistem Pembayaran Sekolah</p>
+        </div>
+      </div>
+
+      <div class="login-hero">
+        <span class="eyebrow">AMAN • CEPAT • TERINTEGRASI</span>
+        <h2>Kelola pembayaran sekolah dalam satu dashboard.</h2>
+        <p>Data siswa, tagihan, pembayaran, tunggakan, kwitansi, dan laporan tersimpan di Firebase.</p>
+      </div>
+
+      <form id="loginForm" class="form-stack">
+        <label>
+          <span>Email</span>
+          <input id="loginEmail" type="email" autocomplete="username" placeholder="admin@sekolah.sch.id" required>
+        </label>
+        <label>
+          <span>Password</span>
+          <div class="password-wrap">
+            <input id="loginPassword" type="password" autocomplete="current-password" placeholder="••••••••" required minlength="6">
+            <button id="togglePassword" type="button" class="icon-btn" aria-label="Tampilkan password">👁</button>
+          </div>
+        </label>
+        <button id="loginBtn" class="btn btn-primary btn-block" type="submit">Masuk ke Dashboard</button>
+        <p id="loginMessage" class="form-message"></p>
+      </form>
+
+      <p class="login-foot">Akun dibuat melalui Firebase Authentication oleh administrator sekolah.</p>
+    </div>
+  </section>
+
+  <!-- APP -->
+  <div id="appView" class="app-shell hidden">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-head">
+        <div class="brand-mark small">SP</div>
+        <div class="brand-copy">
+          <strong id="sideSchoolName">SchoolPay</strong>
+          <span>Pembayaran Sekolah</span>
+        </div>
+        <button id="closeSidebar" class="icon-btn sidebar-close" type="button">✕</button>
+      </div>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-page="dashboard"><span>⌂</span> Dashboard</button>
+        <button class="nav-item" data-page="students"><span>♟</span> Data Siswa</button>
+        <button class="nav-item" data-page="bills"><span>▤</span> Tagihan</button>
+        <button class="nav-item" data-page="payments"><span>₿</span> Pembayaran</button>
+        <button class="nav-item" data-page="reports"><span>▥</span> Laporan</button>
+        <button class="nav-item admin-only" data-page="settings"><span>⚙</span> Pengaturan</button>
+      </nav>
+
+      <div class="sidebar-user">
+        <div class="avatar" id="userAvatar">A</div>
+        <div class="sidebar-user-copy">
+          <strong id="sidebarUserName">Administrator</strong>
+          <span id="sidebarUserRole">admin</span>
+        </div>
+      </div>
+    </aside>
+
+    <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button id="openSidebar" class="icon-btn menu-btn" type="button">☰</button>
+          <div>
+            <h1 id="pageTitle">Dashboard</h1>
+            <p id="todayText">Ringkasan pembayaran sekolah</p>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <div class="user-chip">
+            <div class="avatar" id="topAvatar">A</div>
+            <div>
+              <strong id="topUserName">Administrator</strong>
+              <span id="topUserRole">admin</span>
+            </div>
+          </div>
+          <button id="logoutBtn" class="btn btn-soft" type="button">Keluar</button>
+        </div>
+      </header>
+
+      <main class="content">
+        <!-- DASHBOARD -->
+        <section id="page-dashboard" class="page active">
+          <div class="stats-grid">
+            <article class="stat-card">
+              <div class="stat-icon">♟</div>
+              <div><span>Total Siswa</span><strong id="statStudents">0</strong><small>Siswa terdaftar</small></div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-icon">✓</div>
+              <div><span>Pemasukan Bulan Ini</span><strong id="statIncome">Rp0</strong><small>Pembayaran diterima</small></div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-icon">!</div>
+              <div><span>Total Tunggakan</span><strong id="statArrears">Rp0</strong><small>Sisa tagihan aktif</small></div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-icon">▤</div>
+              <div><span>Tagihan Belum Lunas</span><strong id="statOpenBills">0</strong><small>Termasuk pembayaran sebagian</small></div>
+            </article>
+          </div>
+
+          <div class="dashboard-grid">
+            <article class="panel">
+              <div class="panel-head">
+                <div><h3>Pembayaran Terbaru</h3><p>Transaksi terbaru yang masuk</p></div>
+                <button class="link-btn" data-go="payments">Lihat semua</button>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Tanggal</th><th>Siswa</th><th>Tagihan</th><th>Nominal</th><th>Metode</th></tr></thead>
+                  <tbody id="dashboardPaymentRows"></tbody>
+                </table>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head">
+                <div><h3>Tunggakan Terbesar</h3><p>Prioritas penagihan</p></div>
+              </div>
+              <div id="arrearsList" class="arrears-list"></div>
+            </article>
+          </div>
+        </section>
+
+        <!-- STUDENTS -->
+        <section id="page-students" class="page">
+          <div class="page-toolbar">
+            <div class="search-box">
+              <span>⌕</span>
+              <input id="studentSearch" type="search" placeholder="Cari nama, NIS/NISN, kelas...">
+            </div>
+            <div class="toolbar-actions">
+              <select id="studentClassFilter"><option value="">Semua kelas</option></select>
+              <button id="addStudentBtn" class="btn btn-primary admin-only" type="button">+ Tambah Siswa</button>
+            </div>
+          </div>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div><h3>Data Siswa</h3><p id="studentCountText">0 siswa</p></div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>NIS/NISN</th><th>Nama Siswa</th><th>Kelas</th><th>Orang Tua</th><th>No. HP</th><th>Status</th><th>Aksi</th></tr></thead>
+                <tbody id="studentRows"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <!-- BILLS -->
+        <section id="page-bills" class="page">
+          <div class="page-toolbar">
+            <div class="search-box">
+              <span>⌕</span>
+              <input id="billSearch" type="search" placeholder="Cari siswa, jenis tagihan, periode...">
+            </div>
+            <div class="toolbar-actions">
+              <select id="billStatusFilter">
+                <option value="">Semua status</option>
+                <option value="belum">Belum bayar</option>
+                <option value="sebagian">Sebagian</option>
+                <option value="lunas">Lunas</option>
+              </select>
+              <button id="bulkBillBtn" class="btn btn-soft admin-only" type="button">Tagihan Massal</button>
+              <button id="addBillBtn" class="btn btn-primary admin-only" type="button">+ Buat Tagihan</button>
+            </div>
+          </div>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div><h3>Daftar Tagihan</h3><p id="billCountText">0 tagihan</p></div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Siswa</th><th>Tagihan</th><th>Periode</th><th>Jatuh Tempo</th><th>Nominal</th><th>Terbayar</th><th>Sisa</th><th>Status</th><th>Aksi</th></tr></thead>
+                <tbody id="billRows"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <!-- PAYMENTS -->
+        <section id="page-payments" class="page">
+          <div class="payments-layout">
+            <article class="panel payment-form-card">
+              <div class="panel-head">
+                <div><h3>Input Pembayaran</h3><p>Pilih siswa dan tagihan yang akan dibayar</p></div>
+              </div>
+
+              <form id="paymentForm" class="form-grid">
+                <label class="span-2">
+                  <span>Siswa</span>
+                  <select id="paymentStudent" required><option value="">Pilih siswa</option></select>
+                </label>
+                <label class="span-2">
+                  <span>Tagihan</span>
+                  <select id="paymentBill" required disabled><option value="">Pilih tagihan</option></select>
+                </label>
+
+                <div id="paymentBillInfo" class="bill-info span-2 hidden">
+                  <div><span>Total Tagihan</span><strong id="payInfoTotal">Rp0</strong></div>
+                  <div><span>Sudah Dibayar</span><strong id="payInfoPaid">Rp0</strong></div>
+                  <div><span>Sisa</span><strong id="payInfoRemaining">Rp0</strong></div>
+                </div>
+
+                <label>
+                  <span>Nominal Bayar</span>
+                  <input id="paymentAmount" type="number" min="1" step="1" placeholder="0" required>
+                </label>
+                <label>
+                  <span>Tanggal</span>
+                  <input id="paymentDate" type="date" required>
+                </label>
+                <label>
+                  <span>Metode</span>
+                  <select id="paymentMethod" required>
+                    <option value="Tunai">Tunai</option>
+                    <option value="Transfer">Transfer</option>
+                    <option value="QRIS">QRIS</option>
+                    <option value="Lainnya">Lainnya</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Keterangan</span>
+                  <input id="paymentNote" type="text" maxlength="120" placeholder="Opsional">
+                </label>
+                <button id="savePaymentBtn" class="btn btn-primary span-2" type="submit">Simpan Pembayaran</button>
+              </form>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head">
+                <div><h3>Riwayat Pembayaran</h3><p>Transaksi terbaru</p></div>
+                <div class="search-box compact">
+                  <span>⌕</span><input id="paymentSearch" type="search" placeholder="Cari transaksi...">
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Tanggal</th><th>No. Kwitansi</th><th>Siswa</th><th>Tagihan</th><th>Nominal</th><th>Metode</th><th>Aksi</th></tr></thead>
+                  <tbody id="paymentRows"></tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <!-- REPORTS -->
+        <section id="page-reports" class="page">
+          <div class="report-filters panel">
+            <div>
+              <h3>Laporan Pembayaran</h3>
+              <p>Filter transaksi berdasarkan tanggal lalu ekspor ke CSV.</p>
+            </div>
+            <div class="filter-row">
+              <label><span>Dari</span><input id="reportStart" type="date"></label>
+              <label><span>Sampai</span><input id="reportEnd" type="date"></label>
+              <button id="applyReportFilter" class="btn btn-soft" type="button">Terapkan</button>
+              <button id="exportReportBtn" class="btn btn-primary" type="button">Export CSV</button>
+            </div>
+          </div>
+
+          <div class="stats-grid report-stats">
+            <article class="stat-card"><div class="stat-icon">₿</div><div><span>Total Transaksi</span><strong id="reportTxCount">0</strong><small>Dalam periode</small></div></article>
+            <article class="stat-card"><div class="stat-icon">✓</div><div><span>Total Pemasukan</span><strong id="reportIncome">Rp0</strong><small>Dalam periode</small></div></article>
+            <article class="stat-card"><div class="stat-icon">!</div><div><span>Sisa Tunggakan</span><strong id="reportArrears">Rp0</strong><small>Semua tagihan aktif</small></div></article>
+          </div>
+
+          <article class="panel">
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Tanggal</th><th>No. Kwitansi</th><th>NIS/NISN</th><th>Siswa</th><th>Kelas</th><th>Tagihan</th><th>Metode</th><th>Nominal</th><th>Petugas</th></tr></thead>
+                <tbody id="reportRows"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <!-- SETTINGS -->
+        <section id="page-settings" class="page">
+          <article class="panel settings-card">
+            <div class="panel-head">
+              <div><h3>Identitas Sekolah</h3><p>Dipakai pada dashboard dan kwitansi pembayaran.</p></div>
+            </div>
+            <form id="settingsForm" class="form-grid">
+              <label class="span-2"><span>Nama Sekolah</span><input id="settingSchoolName" required placeholder="Nama sekolah"></label>
+              <label class="span-2"><span>Alamat</span><textarea id="settingAddress" rows="3" placeholder="Alamat sekolah"></textarea></label>
+              <label><span>No. Telepon</span><input id="settingPhone" placeholder="08..."></label>
+              <label><span>Tahun Ajaran</span><input id="settingAcademicYear" placeholder="2026/2027"></label>
+              <label><span>Nama Kepala Sekolah</span><input id="settingPrincipal" placeholder="Nama kepala sekolah"></label>
+              <label><span>Prefix Kwitansi</span><input id="settingReceiptPrefix" maxlength="10" placeholder="BYR"></label>
+              <button class="btn btn-primary span-2" type="submit">Simpan Pengaturan</button>
+            </form>
+          </article>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- MODAL -->
+  <div id="modalRoot" class="modal-root hidden">
+    <div class="modal-backdrop" data-close-modal></div>
+    <div class="modal-card" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <div><h3 id="modalTitle">Form</h3><p id="modalSubtitle"></p></div>
+        <button class="icon-btn" data-close-modal type="button">✕</button>
+      </div>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
