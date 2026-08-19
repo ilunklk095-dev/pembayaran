@@ -2,9 +2,6 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/fireba
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
 
-/*
-  GANTI data di bawah dengan Firebase Config milik Anda:
-  Firebase Console > Project settings > Your apps > Web app > SDK setup and configuration.
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
   apiKey: "AIzaSyBcYsqJz7_HhcGdApR-a0yoNIZhlJhpekc",
